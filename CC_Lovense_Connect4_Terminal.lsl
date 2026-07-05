@@ -41,7 +41,7 @@ default {
         llSetTimerEvent(30.0); // 30s timeout for dialog
         
         llDialog(toucher, "Welcome to Lovense Connect Four!\nChoose your slot to register and open the controller on your phone/browser:", 
-            ["Red (Domme)", "Yellow (Sub)", "Reset Game", "Cancel"], DIALOG_CHAN);
+            ["Red Player", "Yellow Player", "Reset Game", "Cancel"], DIALOG_CHAN);
     }
 
     listen(integer channel, string name, key id, string message) {
@@ -65,9 +65,9 @@ default {
         }
 
         string role = "";
-        if (message == "Red (Domme)") {
+        if (message == "Red Player") {
             role = "red";
-        } else if (message == "Yellow (Sub)") {
+        } else if (message == "Yellow Player") {
             role = "yellow";
         }
 
