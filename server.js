@@ -8,6 +8,11 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 
+// Lovense Credentials
+const LOVENSE_TOKEN = "q9U33GxiMHTq0z1K3gEM3T70RJKPb_3MLlgD0ElnOLFlMN42OFJat-HTWQNIkMyL";
+const LOVENSE_KEY = "6997e394b26472e4";
+const LOVENSE_IV = "6D3C56950B40AF10";
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -157,13 +162,15 @@ app.get('/play/:gameId', (req, res) => {
 });
 
 // Join API
-app.post('/api/join', (req, res) => {
+app.post('/api/join', async (req, res) => {
     const { gameId, uuid, name, role } = req.body;
     if (!gameId || !uuid || !name) {
         return res.status(400).json({ error: "Missing parameters." });
     }
 
     const game = getGame(gameId);
+    let playerObj = null;
+    let assignedRole = null;
     
     // Check if player is already registered in a role
     if (game.player1 && game.player1.uuid === uuid) {
@@ -175,19 +182,59 @@ app.post('/api/join', (req, res) => {
 
     if (role === 'red') {
         if (game.player1) return res.status(400).json({ error: "Red slot already taken." });
-        game.player1 = { uuid, name };
+        game.player1 = { uuid, name, connected: false, qrCode: null, qrLink: null };
+        playerObj = game.player1;
+        assignedRole = 'red';
     } else if (role === 'yellow') {
         if (game.player2) return res.status(400).json({ error: "Yellow slot already taken." });
-        game.player2 = { uuid, name };
+        game.player2 = { uuid, name, connected: false, qrCode: null, qrLink: null };
+        playerObj = game.player2;
+        assignedRole = 'yellow';
     } else {
         // Auto assign
         if (!game.player1) {
-            game.player1 = { uuid, name };
+            game.player1 = { uuid, name, connected: false, qrCode: null, qrLink: null };
+            playerObj = game.player1;
+            assignedRole = 'red';
         } else if (!game.player2) {
-            game.player2 = { uuid, name };
+            game.player2 = { uuid, name, connected: false, qrCode: null, qrLink: null };
+            playerObj = game.player2;
+            assignedRole = 'yellow';
         } else {
             return res.status(400).json({ error: "Game is full." });
         }
+    }
+
+    // Call Lovense to get the QR code for this user if it's not a local mock browser user
+    if (playerObj && !uuid.startsWith('browser_')) {
+        try {
+            console.log(`Requesting Lovense QR code for ${name} (${uuid})`);
+            const response = await fetch('https://api.lovense.com/api/lan/getQrCode', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    token: LOVENSE_TOKEN,
+                    uid: uuid,
+                    v: 2,
+                    uname: name
+                })
+            });
+            const resJson = await response.json();
+            if (resJson.code === 0 && resJson.data) {
+                playerObj.qrCode = resJson.data.qr;
+                playerObj.qrLink = resJson.data.url;
+                console.log(`Lovense QR Code retrieved: ${resJson.data.qr}`);
+            } else {
+                console.error("Lovense QR Code error response:", resJson);
+            }
+        } catch (err) {
+            console.error("Error fetching Lovense QR Code:", err);
+        }
+    } else if (playerObj) {
+        // For local mock player testing, auto-connect immediately!
+        playerObj.connected = true;
     }
 
     if (game.player1 && game.player2) {
@@ -195,8 +242,119 @@ app.post('/api/join', (req, res) => {
     }
 
     io.to(gameId).emit('update', game);
-    res.json({ success: true, role: game.player1 && game.player1.uuid === uuid ? 'red' : 'yellow', game });
+    res.json({ success: true, role: assignedRole, game });
 });
+
+// Lovense Webhook Callback
+app.post('/api/lovense/callback', (req, res) => {
+    console.log("Received Lovense Callback:", req.body);
+    const { uid, status } = req.body;
+    
+    if (!uid) {
+        return res.status(400).send("Missing uid.");
+    }
+    
+    const isConnected = (status === 1 || status === '1');
+    
+    // Find player in active games and update connection status
+    for (const gameId in games) {
+        const game = games[gameId];
+        let updated = false;
+        
+        if (game.player1 && game.player1.uuid === uid) {
+            game.player1.connected = isConnected;
+            updated = true;
+        }
+        if (game.player2 && game.player2.uuid === uid) {
+            game.player2.connected = isConnected;
+            updated = true;
+        }
+        
+        if (updated) {
+            console.log(`Updated connection for player ${uid} in game ${gameId} to: ${isConnected}`);
+            io.to(gameId).emit('update', game);
+        }
+    }
+    
+    res.send("OK");
+});
+
+// Test Vibration API
+app.post('/api/vibe/test', async (req, res) => {
+    const { gameId, role } = req.body;
+    const game = games[gameId];
+    if (!game) return res.status(404).json({ error: "Game not found." });
+    
+    const player = role === 'red' ? game.player1 : game.player2;
+    if (!player) return res.status(400).json({ error: "Player not registered." });
+    
+    console.log(`Triggering test vibration for ${player.name} (${player.uuid})`);
+    await triggerVibration(player.uuid, 'move');
+    res.json({ success: true });
+});
+
+// Helper: Trigger Server-Side Vibration
+async function triggerVibration(uid, type) {
+    if (!uid) return;
+    if (uid.startsWith('browser_')) {
+        console.log(`Skipping vibration for local browser mock player: ${uid}`);
+        return;
+    }
+    
+    let strength = 0;
+    let duration = 0;
+    
+    switch (type) {
+        case 'move':
+            strength = 6;
+            duration = 1;
+            break;
+        case 'turn_alert':
+            strength = 8;
+            duration = 1;
+            break;
+        case 'block':
+            strength = 12;
+            duration = 2;
+            break;
+        case 'threat':
+            strength = 15;
+            duration = 2;
+            break;
+        case 'win':
+            strength = 12;
+            duration = 4;
+            break;
+        case 'lose':
+            strength = 20; // Heavy rumble for defeat!
+            duration = 5;
+            break;
+        default:
+            return;
+    }
+    
+    try {
+        console.log(`Sending vibration command: Vibrate:${strength} for ${duration}s to UID ${uid}`);
+        const response = await fetch('https://api.lovense.com/api/lan/v2/command', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                token: LOVENSE_TOKEN,
+                uid: uid,
+                command: "Function",
+                action: `Vibrate:${strength}`,
+                timeSec: duration,
+                apiVer: 2
+            })
+        });
+        const resJson = await response.json();
+        console.log("Lovense command response:", resJson);
+    } catch (err) {
+        console.error("Error triggering Lovense vibration:", err);
+    }
+}
 
 // Reset Game API
 app.post('/api/reset', (req, res) => {
@@ -215,7 +373,7 @@ app.post('/api/reset', (req, res) => {
 });
 
 // Drop Token API
-app.post('/api/move', (req, res) => {
+app.post('/api/move', async (req, res) => {
     const { gameId, role, col } = req.body;
     const game = games[gameId];
 
@@ -251,16 +409,17 @@ app.post('/api/move', (req, res) => {
 
     // Check for Win or Draw
     const winResult = checkWin(game.board);
-    let vibeEvents = [];
+    
+    // Server-Side Vibration commands to queue
+    const vibeQueue = [];
 
     if (winResult) {
         game.status = 'won';
         game.winner = winResult.winner;
         game.winCoords = winResult.coords;
 
-        // Vibe Event: Win/Loss
-        vibeEvents.push({ role: 'red', type: game.winner === 1 ? 'win' : 'lose' });
-        vibeEvents.push({ role: 'yellow', type: game.winner === 2 ? 'win' : 'lose' });
+        if (game.player1) vibeQueue.push({ uid: game.player1.uuid, type: game.winner === 1 ? 'win' : 'lose' });
+        if (game.player2) vibeQueue.push({ uid: game.player2.uuid, type: game.winner === 2 ? 'win' : 'lose' });
     } else if (checkDraw(game.board)) {
         game.status = 'draw';
     } else {
@@ -272,20 +431,32 @@ app.post('/api/move', (req, res) => {
         
         // If player has a threat, alert the opponent
         if (myWinningSlotsAfter.length > 0) {
-            vibeEvents.push({ role: role === 'red' ? 'yellow' : 'red', type: 'threat' });
+            const oppUuid = role === 'red' ? (game.player2 && game.player2.uuid) : (game.player1 && game.player1.uuid);
+            vibeQueue.push({ uid: oppUuid, type: 'threat' });
         }
 
         // If player successfully blocked the opponent's threat, reward them
         if (isBlock) {
-            vibeEvents.push({ role: role, type: 'block' });
+            const myUuid = role === 'red' ? (game.player1 && game.player1.uuid) : (game.player2 && game.player2.uuid);
+            vibeQueue.push({ uid: myUuid, type: 'block' });
         } else {
             // Standard move vibrations
-            vibeEvents.push({ role: role === 'red' ? 'yellow' : 'red', type: 'turn_alert' });
-            vibeEvents.push({ role: role, type: 'move' });
+            const oppUuid = role === 'red' ? (game.player2 && game.player2.uuid) : (game.player1 && game.player1.uuid);
+            const myUuid = role === 'red' ? (game.player1 && game.player1.uuid) : (game.player2 && game.player2.uuid);
+            
+            vibeQueue.push({ uid: oppUuid, type: 'turn_alert' });
+            vibeQueue.push({ uid: myUuid, type: 'move' });
         }
     }
 
-    io.to(gameId).emit('update', { game, vibeEvents, lastMove: { r, c, player: playerNum } });
+    // Broadcast the state update to all spectators and controllers
+    io.to(gameId).emit('update', { game, lastMove: { r, c, player: playerNum } });
+    
+    // Execute all vibrations
+    vibeQueue.forEach(item => {
+        if (item.uid) triggerVibration(item.uid, item.type);
+    });
+
     res.json({ success: true, game });
 });
 

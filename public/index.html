@@ -698,16 +698,18 @@ input[type="text"]:focus {
             <!-- Lovense Setup Card (Glassmorphic) -->
             <section class="setup-section card">
                 <h3 class="card-title">🔌 Lovense Connection</h3>
-                <p class="card-desc">Turn on <strong>LAN Mode</strong> (Game Mode) in your Lovense app.</p>
+                <p class="card-desc" id="connection-desc">Scan the QR code below using your Lovense app (or phone camera) to connect your toy instantly.</p>
                 
-                <div class="form-group">
-                    <label for="toy-ip">Phone App IP Address:</label>
-                    <div class="input-row">
-                        <input type="text" id="toy-ip" placeholder="e.g. 192.168.1.50" value="127.0.0.1">
-                        <button id="btn-test-toy" class="btn-secondary">Test Vibe</button>
+                <div class="qr-container" style="text-align: center; margin: 15px 0;">
+                    <div id="qr-loading" style="font-size: 0.85rem; color: var(--text-secondary);">Generating QR Code...</div>
+                    <img id="qr-image" class="hidden" style="max-width: 180px; border: 6px solid #fff; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); margin: 0 auto;" />
+                    <div style="margin-top: 12px;">
+                        <a id="qr-link" href="#" target="_blank" class="btn-secondary hidden" style="display: inline-block; font-size: 0.8rem; padding: 6px 12px; text-decoration: none;">Open Lovense App</a>
                     </div>
                 </div>
-                <div id="toy-status" class="status-indicator offline">Disconnected</div>
+                
+                <div id="toy-status" class="status-indicator offline">Disconnected: Scan QR code</div>
+                <button id="btn-test-toy" class="btn-secondary hidden" style="margin-top: 12px; width: 100%;">Test Vibe</button>
             </section>
 
             <!-- Role / Match Setup -->
@@ -889,7 +891,11 @@ input[type="text"]:focus {
             // Toy testing
             document.getElementById('btn-test-toy').addEventListener('click', () => {
                 logActivity("Testing Lovense connection...", "system");
-                triggerLocalVibe(8, 2);
+                fetch('/api/vibe/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gameId, role: myRole })
+                });
             });
 
             // Column clicks
@@ -900,10 +906,6 @@ input[type="text"]:focus {
                     makeMove(col);
                 });
             });
-
-            // Periodically check local Lovense status
-            setInterval(checkLovenseStatus, 5000);
-            checkLovenseStatus();
         }
 
         function joinRole(role) {
@@ -956,6 +958,41 @@ input[type="text"]:focus {
             const turnText = document.getElementById('turn-indicator');
             const playerNum = myRole === 'red' ? 1 : 2;
 
+            // Update Lovense connection UI based on server state
+            const me = playerNum === 1 ? game.player1 : game.player2;
+            if (me) {
+                const qrImage = document.getElementById('qr-image');
+                const qrLink = document.getElementById('qr-link');
+                const qrLoading = document.getElementById('qr-loading');
+                const toyStatus = document.getElementById('toy-status');
+                const testBtn = document.getElementById('btn-test-toy');
+                
+                if (me.connected) {
+                    qrImage.classList.add('hidden');
+                    qrLink.classList.add('hidden');
+                    qrLoading.classList.add('hidden');
+                    toyStatus.innerText = "Connected: Toy Active";
+                    toyStatus.className = "status-indicator online";
+                    testBtn.classList.remove('hidden');
+                } else {
+                    toyStatus.innerText = "Disconnected: Scan QR code";
+                    toyStatus.className = "status-indicator offline";
+                    testBtn.classList.add('hidden');
+                    
+                    if (me.qrCode) {
+                        qrImage.src = me.qrCode;
+                        qrImage.classList.remove('hidden');
+                        qrLink.href = me.qrLink;
+                        qrLink.classList.remove('hidden');
+                        qrLoading.classList.add('hidden');
+                    } else {
+                        qrImage.classList.add('hidden');
+                        qrLink.classList.add('hidden');
+                        qrLoading.classList.remove('hidden');
+                    }
+                }
+            }
+
             if (game.status === 'playing') {
                 if (game.turn === playerNum) {
                     activePad.classList.remove('disabled');
@@ -986,97 +1023,6 @@ input[type="text"]:focus {
             }
         }
 
-        // =========================================
-        // LOVENSE LOCAL LAN API INTEGRATION
-        // =========================================
-        function checkLovenseStatus() {
-            if (viewType === 'board') return; // Spectators don't need toy connection
-            
-            const ip = document.getElementById('toy-ip').value || '127.0.0.1';
-            const statusEl = document.getElementById('toy-status');
-
-            // Fetch local status
-            fetch(`http://${ip}:20075/status`)
-            .then(res => res.json())
-            .then(data => {
-                if (data.code === 200) {
-                    statusEl.innerText = "Connected: Toy Active";
-                    statusEl.className = "status-indicator online";
-                } else {
-                    statusEl.innerText = "Connected: No Toy Found";
-                    statusEl.className = "status-indicator warning";
-                }
-            })
-            .catch(err => {
-                statusEl.innerText = "Disconnected: App Offline";
-                statusEl.className = "status-indicator offline";
-            });
-        }
-
-        function triggerLocalVibe(strength, duration) {
-            const ip = document.getElementById('toy-ip').value || '127.0.0.1';
-            
-            // Call local LAN API
-            // Note: Use no-cors mode to bypass browser security policies blocking local loopbacks
-            fetch(`http://${ip}:20075/control?v=${strength}&time=${duration}`, { mode: 'no-cors' })
-            .then(() => {
-                logActivity(`Toy vibrated! Strength: ${strength}/20, Duration: ${duration}s`, "toy");
-            })
-            .catch(err => {
-                logActivity(`Failed to send vibration: Ensure Lovense App is open with LAN enabled.`, "error");
-            });
-        }
-
-        function handleVibeEvents(vibeEvents) {
-            if (!myRole || !vibeEvents) return;
-
-            vibeEvents.forEach(evt => {
-                if (evt.role === myRole) {
-                    let strength = 0;
-                    let duration = 0;
-                    let description = "";
-
-                    switch (evt.type) {
-                        case 'turn_alert':
-                            strength = 3;
-                            duration = 0.5;
-                            description = "🔔 Your turn starts! (Gentle Reminder)";
-                            break;
-                        case 'move':
-                            strength = 5;
-                            duration = 1;
-                            description = "🎯 Piece dropped! (Action Feedback)";
-                            break;
-                        case 'threat':
-                            strength = 10;
-                            duration = 2.5;
-                            description = "⚠️ WARNING: Opponent has 3-in-a-row! Block them!";
-                            break;
-                        case 'block':
-                            strength = 12;
-                            duration = 1.5;
-                            description = "🛡️ SUCCESSFUL BLOCK! Opponent was shut down!";
-                            break;
-                        case 'win':
-                            strength = 8;
-                            duration = 5;
-                            description = "🏆 VICTORY BLAST! Wave pleasure active.";
-                            break;
-                        case 'lose':
-                            strength = 20; // Maximum intensity
-                            duration = 8;
-                            description = "💥 PENALTY BLAST! Continuous heavy rumble.";
-                            break;
-                    }
-
-                    if (strength > 0) {
-                        logActivity(description, "system");
-                        triggerLocalVibe(strength, duration);
-                    }
-                }
-            });
-        }
-
         function logActivity(text, type) {
             const log = document.getElementById('activity-log');
             const entry = document.createElement('div');
@@ -1094,16 +1040,12 @@ input[type="text"]:focus {
         // =========================================
         socket.on('update', (data) => {
             const game = data.game || data; // Handle raw updates vs action updates
-            const vibeEvents = data.vibeEvents || null;
             const lastMove = data.lastMove || null;
 
             if (viewType === 'board') {
                 updateSpectatorBoard(game, lastMove);
             } else {
                 updatePlayerController(game);
-                if (vibeEvents) {
-                    handleVibeEvents(vibeEvents);
-                }
             }
         });
     </script>
