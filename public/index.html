@@ -989,6 +989,13 @@ input[type="text"]:focus {
                     } else {
                         qrImage.classList.add('hidden');
                         qrLink.classList.add('hidden');
+                        if (me.qrError) {
+                            qrLoading.innerText = "Error: " + me.qrError;
+                            qrLoading.style.color = "var(--neon-red)";
+                        } else {
+                            qrLoading.innerText = "Generating QR Code...";
+                            qrLoading.style.color = "var(--text-secondary)";
+                        }
                         qrLoading.classList.remove('hidden');
                     }
                 }
