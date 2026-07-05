@@ -696,7 +696,7 @@ input[type="text"]:focus {
 
         <main class="controller-container">
             <!-- Lovense Setup Card (Glassmorphic) -->
-            <section class="setup-section card">
+            <section id="setup-section" class="setup-section card hidden">
                 <h3 class="card-title">🔌 Lovense Connection</h3>
                 <p class="card-desc" id="connection-desc">Scan the QR code below using your Lovense app (or phone camera) to connect your toy instantly.</p>
                 
@@ -921,6 +921,7 @@ input[type="text"]:focus {
                 } else {
                     myRole = role;
                     document.getElementById('role-section').classList.add('hidden');
+                    document.getElementById('setup-section').classList.remove('hidden');
                     document.getElementById('control-pad').classList.remove('hidden');
                     logActivity(`Joined match as ${role.toUpperCase()} Player!`, "system");
                 }
