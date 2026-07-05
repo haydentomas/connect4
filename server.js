@@ -399,13 +399,28 @@ app.post('/api/reset', (req, res) => {
 
 // Drop Token API
 app.post('/api/move', async (req, res) => {
-    const { gameId, role, col } = req.body;
+    const { gameId, role, uuid, col } = req.body;
     const game = games[gameId];
 
     if (!game) return res.status(404).json({ error: "Game not found." });
     if (game.status !== 'playing') return res.status(400).json({ error: "Game is not active." });
 
-    const playerNum = role === 'red' ? 1 : 2;
+    let activeRole = role;
+    if (uuid) {
+        if (game.player1 && game.player1.uuid === uuid) {
+            activeRole = 'red';
+        } else if (game.player2 && game.player2.uuid === uuid) {
+            activeRole = 'yellow';
+        } else {
+            return res.status(400).json({ error: "You are not a registered player in this game." });
+        }
+    }
+
+    if (!activeRole) {
+        return res.status(400).json({ error: "Player role not specified." });
+    }
+
+    const playerNum = activeRole === 'red' ? 1 : 2;
     if (game.turn !== playerNum) return res.status(400).json({ error: "Not your turn." });
 
     const c = parseInt(col);

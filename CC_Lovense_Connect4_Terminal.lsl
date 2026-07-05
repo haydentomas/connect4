@@ -34,6 +34,30 @@ default {
 
     touch_start(integer total_number) {
         key toucher = llDetectedKey(0);
+        integer face = llDetectedTouchFace(0);
+        vector touchST = llDetectedTouchST(0);
+        
+        // Check if player clicked the board face (MOAP_FACE = 2)
+        if (face == MOAP_FACE && touchST != <-1.0, -1.0, 0.0>) {
+            float s = touchST.x;
+            integer col = (integer)(s * 7.0);
+            if (col < 0) col = 0;
+            else if (col > 6) col = 6;
+            
+            // Send move request to server using toucher's UUID
+            string body = "gameId=" + (string)llGetKey() + 
+                          "&uuid=" + (string)toucher + 
+                          "&col=" + (string)col;
+            
+            gUser = toucher; // Remember who clicked for error messages
+            gPendingRole = ""; // Reset pending role since it's a move
+            gHttpReq = llHTTPRequest(SERVER_URL + "/api/move", [
+                HTTP_METHOD, "POST",
+                HTTP_MIMETYPE, "application/x-www-form-urlencoded"
+            ], body);
+            return;
+        }
+        
         gUser = toucher;
         
         // Remove previous listener if any
@@ -92,23 +116,41 @@ default {
         if (request_id != gHttpReq) return;
         gHttpReq = NULL_KEY;
 
+        if (status == 400 || status == 404) {
+            // Check if there is an error message in JSON format: {"error":"..."}
+            integer errStart = llSubStringIndex(body, "\"error\":\"");
+            if (errStart != -1) {
+                string errMsg = llDeleteSubString(body, 0, errStart + 8);
+                integer errEnd = llSubStringIndex(errMsg, "\"");
+                if (errEnd != -1) {
+                    errMsg = llDeleteSubString(errMsg, errEnd, -1);
+                }
+                llRegionSayTo(gUser, 0, "⚠️ " + errMsg);
+            } else {
+                llRegionSayTo(gUser, 0, "⚠️ Error: " + body);
+            }
+            return;
+        }
+
         if (status != 200) {
-            llRegionSayTo(gUser, 0, "⚠️ Connection Error: Server could not be reached. Ensure the server is running and the URL in the script description is correct.");
+            llRegionSayTo(gUser, 0, "⚠️ Connection Error (Status " + (string)status + "): Server could not be reached.");
             return;
         }
 
         // Response contains success/error JSON
-        // Simple search check for error text
         if (llSubStringIndex(body, "taken") != -1) {
             llRegionSayTo(gUser, 0, "❌ Error: The " + gPendingRole + " role is already taken by another player!");
         } else if (llSubStringIndex(body, "success\":true") != -1) {
-            // Load play URL directly in viewer browser
-            string playUrl = SERVER_URL + "/play/" + (string)llGetKey() + 
-                             "?name=" + llEscapeURL(llKey2Name(gUser)) + 
-                             "&uuid=" + (string)gUser;
-            
-            llLoadURL(gUser, "Open your Lovense Connect 4 Game Controller:", playUrl);
-            llRegionSayTo(gUser, 0, "✅ Registered successfully! If the browser link did not pop up, click here to open: " + playUrl);
+            if (gPendingRole != "") {
+                // Load play URL directly in viewer browser
+                string playUrl = SERVER_URL + "/play/" + (string)llGetKey() + 
+                                 "?name=" + llEscapeURL(llKey2Name(gUser)) + 
+                                 "&uuid=" + (string)gUser;
+                
+                llLoadURL(gUser, "Open your Lovense Connect 4 Game Controller:", playUrl);
+                llRegionSayTo(gUser, 0, "✅ Registered successfully! If the browser link did not pop up, click here to open: " + playUrl);
+                gPendingRole = ""; // Reset pending role
+            }
         }
     }
 
