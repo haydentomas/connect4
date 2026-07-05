@@ -31,10 +31,12 @@ cd /var/www/connect4.alekzane.co.uk
 git fetch origin
 git reset --hard origin/main
 
-# 3. Restart the game server using PM2 (usually named 'connect4' or 'app')
+# 3. Restart the game server using PM2 (usually named 'connect4', 'app', or use 'all')
 pm2 restart connect4
 # or
 pm2 restart app
+# or
+pm2 restart all
 ```
 
 *(Note: If you ever forget the PM2 process name, run `pm2 list` to check.)*
