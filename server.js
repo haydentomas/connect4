@@ -3,6 +3,7 @@ const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
 const path = require('path');
+const https = require('https');
 
 const app = express();
 const server = http.createServer(app);
@@ -151,6 +152,40 @@ function getGame(gameId) {
     return games[gameId];
 }
 
+// Helper: Secure POST request using built-in https module
+function securePost(url, data) {
+    return new Promise((resolve, reject) => {
+        const urlObj = new URL(url);
+        const postData = JSON.stringify(data);
+        
+        const options = {
+            hostname: urlObj.hostname,
+            path: urlObj.pathname + urlObj.search,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData)
+            }
+        };
+        
+        const req = https.request(options, (res) => {
+            let body = '';
+            res.on('data', (chunk) => body += chunk);
+            res.on('end', () => {
+                try {
+                    resolve(JSON.parse(body));
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+        
+        req.on('error', (e) => reject(e));
+        req.write(postData);
+        req.end();
+    });
+}
+
 // Serve Spectator Page
 app.get('/board/:gameId', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -209,19 +244,12 @@ app.post('/api/join', async (req, res) => {
     if (playerObj && !uuid.startsWith('browser_')) {
         try {
             console.log(`Requesting Lovense QR code for ${name} (${uuid})`);
-            const response = await fetch('https://api.lovense.com/api/lan/getQrCode', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    token: LOVENSE_TOKEN,
-                    uid: uuid,
-                    v: 2,
-                    uname: name
-                })
+            const resJson = await securePost('https://api.lovense-api.com/api/lan/getQrCode', {
+                token: LOVENSE_TOKEN,
+                uid: uuid,
+                v: 2,
+                uname: name
             });
-            const resJson = await response.json();
             if (resJson.code === 0 && resJson.data) {
                 playerObj.qrCode = resJson.data.qr;
                 playerObj.qrLink = resJson.data.url;
@@ -335,21 +363,14 @@ async function triggerVibration(uid, type) {
     
     try {
         console.log(`Sending vibration command: Vibrate:${strength} for ${duration}s to UID ${uid}`);
-        const response = await fetch('https://api.lovense.com/api/lan/v2/command', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                token: LOVENSE_TOKEN,
-                uid: uid,
-                command: "Function",
-                action: `Vibrate:${strength}`,
-                timeSec: duration,
-                apiVer: 2
-            })
+        const resJson = await securePost('https://api.lovense-api.com/api/lan/v2/command', {
+            token: LOVENSE_TOKEN,
+            uid: uid,
+            command: "Function",
+            action: `Vibrate:${strength}`,
+            timeSec: duration,
+            apiVer: 2
         });
-        const resJson = await response.json();
         console.log("Lovense command response:", resJson);
     } catch (err) {
         console.error("Error triggering Lovense vibration:", err);
