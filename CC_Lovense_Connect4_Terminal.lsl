@@ -125,7 +125,17 @@ default {
                 if (errEnd != -1) {
                     errMsg = llDeleteSubString(errMsg, errEnd, -1);
                 }
-                llRegionSayTo(gUser, 0, "⚠️ " + errMsg);
+                
+                if (errMsg == "Game is not active.") {
+                    // Open the registration menu
+                    if (gListen) llListenRemove(gListen);
+                    gListen = llListen(DIALOG_CHAN, "", gUser, "");
+                    llSetTimerEvent(30.0);
+                    llDialog(gUser, "Welcome to Lovense Connect Four!\nThe game is not active yet. Choose your slot to register and begin:", 
+                        ["Red Player", "Yellow Player", "Reset Game", "Cancel"], DIALOG_CHAN);
+                } else {
+                    llRegionSayTo(gUser, 0, "⚠️ " + errMsg);
+                }
             } else {
                 llRegionSayTo(gUser, 0, "⚠️ Error: " + body);
             }
