@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lovense Connect Four</title>
+    <!-- Premium Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+    <!-- Socket.io Client -->
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+
+    <!-- ========================================= -->
+    <!-- SPECTATOR BOARD VIEW -->
+    <!-- ========================================= -->
+    <div id="spectator-view" class="view hidden">
+        <header>
+            <h1 class="logo">CONTROL & CHAOS</h1>
+            <h2 class="sub-logo">LOVENSE CONNECT 4</h2>
+        </header>
+
+        <main class="spectator-container">
+            <!-- Player Stats Header -->
+            <div class="players-bar">
+                <div id="player-red-card" class="player-card red-card">
+                    <div class="color-indicator"></div>
+                    <div class="player-info">
+                        <span class="player-label">RED PLAYER</span>
+                        <span id="player-red-name" class="player-name">Waiting...</span>
+                    </div>
+                </div>
+
+                <div class="status-center">
+                    <span id="game-status-text" class="status-badge">WAITING FOR PLAYERS</span>
+                    <button id="btn-reset-board" class="btn-reset">RESET MATCH</button>
+                </div>
+
+                <div id="player-yellow-card" class="player-card yellow-card">
+                    <div class="player-info text-right">
+                        <span class="player-label">YELLOW PLAYER</span>
+                        <span id="player-yellow-name" class="player-name">Waiting...</span>
+                    </div>
+                    <div class="color-indicator"></div>
+                </div>
+            </div>
+
+            <!-- In-World Connect 4 Grid -->
+            <div class="board-frame-outer">
+                <div class="board-frame">
+                    <!-- Drop Slot Columns (Visual only) -->
+                    <div class="board-columns-guide">
+                        <div class="guide-col"></div>
+                        <div class="guide-col"></div>
+                        <div class="guide-col"></div>
+                        <div class="guide-col"></div>
+                        <div class="guide-col"></div>
+                        <div class="guide-col"></div>
+                        <div class="guide-col"></div>
+                    </div>
+                    
+                    <!-- Coin Slots Grid (Drawn dynamically) -->
+                    <div id="connect4-grid" class="board-grid"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- ========================================= -->
+    <!-- PLAYER CONTROLLER VIEW -->
+    <!-- ========================================= -->
+    <div id="controller-view" class="view hidden">
+        <header class="controller-header">
+            <h1 class="logo-mini">C&C ARCADE</h1>
+            <span class="game-title">Connect 4 Controller</span>
+        </header>
+
+        <main class="controller-container">
+            <!-- Lovense Setup Card (Glassmorphic) -->
+            <section class="setup-section card">
+                <h3 class="card-title">🔌 Lovense Connection</h3>
+                <p class="card-desc">Turn on <strong>LAN Mode</strong> (Game Mode) in your Lovense app.</p>
+                
+                <div class="form-group">
+                    <label for="toy-ip">Phone App IP Address:</label>
+                    <div class="input-row">
+                        <input type="text" id="toy-ip" placeholder="e.g. 192.168.1.50" value="127.0.0.1">
+                        <button id="btn-test-toy" class="btn-secondary">Test Vibe</button>
+                    </div>
+                </div>
+                <div id="toy-status" class="status-indicator offline">Disconnected</div>
+            </section>
+
+            <!-- Role / Match Setup -->
+            <section id="role-section" class="role-section card">
+                <h3 class="card-title">👥 Choose Player Role</h3>
+                <div class="role-buttons">
+                    <button id="btn-join-red" class="btn-role red-btn">Join Red (Domme)</button>
+                    <button id="btn-join-yellow" class="btn-role yellow-btn">Join Yellow (Sub)</button>
+                </div>
+            </section>
+
+            <!-- Active Controller Pad -->
+            <section id="control-pad" class="control-pad card hidden">
+                <div class="turn-banner">
+                    <span id="turn-indicator">Waiting to start...</span>
+                </div>
+
+                <h3 class="card-title text-center">👇 Tap a column to drop coin</h3>
+                <div class="column-selectors">
+                    <button class="btn-col" data-col="0">1</button>
+                    <button class="btn-col" data-col="1">2</button>
+                    <button class="btn-col" data-col="2">3</button>
+                    <button class="btn-col" data-col="3">4</button>
+                    <button class="btn-col" data-col="4">5</button>
+                    <button class="btn-col" data-col="5">6</button>
+                    <button class="btn-col" data-col="6">7</button>
+                </div>
+            </section>
+
+            <!-- Vibe Logs -->
+            <section class="card">
+                <h3 class="card-title">📝 Activity Log</h3>
+                <div id="activity-log" class="activity-log">
+                    <div class="log-entry system">Ready. Setup your Lovense and select a role to begin.</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Client Logic -->
+    <script>
+        const socket = io();
+        
+        // Parse Route
+        const pathParts = window.location.pathname.split('/');
+        const viewType = pathParts[1]; // 'board' or 'play'
+        const gameId = pathParts[2] || 'lobby';
+
+        // State variables
+        let myRole = null; // 'red', 'yellow', or null
+        let myName = new URLSearchParams(window.location.search).get('name') || "Player";
+        let myUuid = new URLSearchParams(window.location.search).get('uuid') || generateUUID();
+        let currentTurn = 1;
+        let isMoving = false;
+
+        // Initialize Page
+        document.addEventListener("DOMContentLoaded", () => {
+            socket.emit('join_game', gameId);
+
+            if (viewType === 'board') {
+                document.getElementById('spectator-view').classList.remove('hidden');
+                setupSpectatorBoard();
+            } else {
+                document.getElementById('controller-view').classList.remove('hidden');
+                setupPlayerController();
+            }
+        });
+
+        // Generate UUID for browser session if not provided by SL
+        function generateUUID() {
+            return 'browser_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // =========================================
+        // SPECTATOR BOARD RENDERING
+        // =========================================
+        function setupSpectatorBoard() {
+            const gridContainer = document.getElementById('connect4-grid');
+            gridContainer.innerHTML = '';
+            
+            // Generate board slots (6 rows x 7 cols)
+            // Render row 5 (top) down to row 0 (bottom)
+            for (let r = 5; r >= 0; r--) {
+                for (let c = 0; c < 7; c++) {
+                    const slot = document.createElement('div');
+                    slot.classList.add('slot');
+                    slot.id = `slot-${r}-${c}`;
+                    
+                    const innerCircle = document.createElement('div');
+                    innerCircle.classList.add('coin-circle');
+                    slot.appendChild(innerCircle);
+                    
+                    gridContainer.appendChild(slot);
+                }
+            }
+
+            document.getElementById('btn-reset-board').addEventListener('click', () => {
+                fetch('/api/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gameId })
+                });
+            });
+        }
+
+        function updateSpectatorBoard(game, lastMove) {
+            // Update names
+            document.getElementById('player-red-name').innerText = game.player1 ? game.player1.name : 'Waiting...';
+            document.getElementById('player-yellow-name').innerText = game.player2 ? game.player2.name : 'Waiting...';
+
+            // Reset cards highlight
+            document.getElementById('player-red-card').classList.remove('active');
+            document.getElementById('player-yellow-card').classList.remove('active');
+
+            if (game.status === 'playing') {
+                if (game.turn === 1) {
+                    document.getElementById('player-red-card').classList.add('active');
+                    document.getElementById('game-status-text').innerText = "RED'S TURN";
+                } else {
+                    document.getElementById('player-yellow-card').classList.add('active');
+                    document.getElementById('game-status-text').innerText = "YELLOW'S TURN";
+                }
+            } else if (game.status === 'won') {
+                const winnerName = game.winner === 1 ? game.player1.name : game.player2.name;
+                document.getElementById('game-status-text').innerText = `${winnerName.toUpperCase()} WINS!`;
+                
+                // Highlight winning cards
+                if (game.winner === 1) document.getElementById('player-red-card').classList.add('active');
+                else document.getElementById('player-yellow-card').classList.add('active');
+            } else if (game.status === 'draw') {
+                document.getElementById('game-status-text').innerText = "MATCH DRAW!";
+            } else {
+                document.getElementById('game-status-text').innerText = "WAITING FOR PLAYERS";
+            }
+
+            // Update slots
+            for (let r = 0; r < 6; r++) {
+                for (let c = 0; c < 7; c++) {
+                    const slot = document.getElementById(`slot-${r}-${c}`);
+                    const circle = slot.querySelector('.coin-circle');
+                    const val = game.board[r][c];
+                    
+                    circle.className = 'coin-circle'; // Clear previous
+                    if (val === 1) {
+                        circle.classList.add('red-coin');
+                    } else if (val === 2) {
+                        circle.classList.add('yellow-coin');
+                    }
+                }
+            }
+
+            // Animate last move if present
+            if (lastMove) {
+                const slot = document.getElementById(`slot-${lastMove.r}-${lastMove.c}`);
+                const circle = slot.querySelector('.coin-circle');
+                circle.classList.add('drop-animate');
+            }
+
+            // Highlight Winning Line
+            if (game.status === 'won' && game.winCoords) {
+                game.winCoords.forEach(([r, c]) => {
+                    const slot = document.getElementById(`slot-${r}-${c}`);
+                    slot.classList.add('winning-slot');
+                });
+            } else {
+                // Clear winning highlights
+                document.querySelectorAll('.slot').forEach(slot => slot.classList.remove('winning-slot'));
+            }
+        }
+
+        // =========================================
+        // PLAYER CONTROLLER HANDLER
+        // =========================================
+        function setupPlayerController() {
+            // Join buttons
+            document.getElementById('btn-join-red').addEventListener('click', () => joinRole('red'));
+            document.getElementById('btn-join-yellow').addEventListener('click', () => joinRole('yellow'));
+
+            // Toy testing
+            document.getElementById('btn-test-toy').addEventListener('click', () => {
+                logActivity("Testing Lovense connection...", "system");
+                triggerLocalVibe(8, 2);
+            });
+
+            // Column clicks
+            document.querySelectorAll('.btn-col').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    if (isMoving) return;
+                    const col = e.target.dataset.col;
+                    makeMove(col);
+                });
+            });
+
+            // Periodically check local Lovense status
+            setInterval(checkLovenseStatus, 5000);
+            checkLovenseStatus();
+        }
+
+        function joinRole(role) {
+            fetch('/api/join', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ gameId, uuid: myUuid, name: myName, role })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) {
+                    alert(data.error);
+                } else {
+                    myRole = role;
+                    document.getElementById('role-section').classList.add('hidden');
+                    document.getElementById('control-pad').classList.remove('hidden');
+                    logActivity(`Joined match as ${role.toUpperCase()} Player!`, "system");
+                }
+            });
+        }
+
+        function makeMove(col) {
+            isMoving = true;
+            fetch('/api/move', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ gameId, role: myRole, col })
+            })
+            .then(res => res.json())
+            .then(data => {
+                isMoving = false;
+                if (data.error) {
+                    logActivity(`Invalid Move: ${data.error}`, "error");
+                }
+            })
+            .catch(err => {
+                isMoving = false;
+            });
+        }
+
+        function updatePlayerController(game) {
+            if (!myRole) {
+                // If not in a role, update UI buttons availability
+                document.getElementById('btn-join-red').disabled = !!game.player1;
+                document.getElementById('btn-join-yellow').disabled = !!game.player2;
+                return;
+            }
+
+            const activePad = document.getElementById('control-pad');
+            const turnText = document.getElementById('turn-indicator');
+            const playerNum = myRole === 'red' ? 1 : 2;
+
+            if (game.status === 'playing') {
+                if (game.turn === playerNum) {
+                    activePad.classList.remove('disabled');
+                    turnText.innerText = "🟢 IT'S YOUR TURN! Drop a coin.";
+                    turnText.className = "your-turn";
+                } else {
+                    activePad.classList.add('disabled');
+                    turnText.innerText = "⏳ Opponent is making their move...";
+                    turnText.className = "opponent-turn";
+                }
+            } else if (game.status === 'won') {
+                activePad.classList.add('disabled');
+                if (game.winner === playerNum) {
+                    turnText.innerText = "🎉 YOU WON THE MATCH!";
+                    turnText.className = "victory";
+                } else {
+                    turnText.innerText = "💥 YOU LOST. Better luck next time!";
+                    turnText.className = "defeat";
+                }
+            } else if (game.status === 'draw') {
+                activePad.classList.add('disabled');
+                turnText.innerText = "🤝 Match ended in a draw.";
+                turnText.className = "draw";
+            } else {
+                activePad.classList.add('disabled');
+                turnText.innerText = "⏳ Waiting for opponent to join...";
+                turnText.className = "waiting";
+            }
+        }
+
+        // =========================================
+        // LOVENSE LOCAL LAN API INTEGRATION
+        // =========================================
+        function checkLovenseStatus() {
+            if (viewType === 'board') return; // Spectators don't need toy connection
+            
+            const ip = document.getElementById('toy-ip').value || '127.0.0.1';
+            const statusEl = document.getElementById('toy-status');
+
+            // Fetch local status
+            fetch(`http://${ip}:20075/status`)
+            .then(res => res.json())
+            .then(data => {
+                if (data.code === 200) {
+                    statusEl.innerText = "Connected: Toy Active";
+                    statusEl.className = "status-indicator online";
+                } else {
+                    statusEl.innerText = "Connected: No Toy Found";
+                    statusEl.className = "status-indicator warning";
+                }
+            })
+            .catch(err => {
+                statusEl.innerText = "Disconnected: App Offline";
+                statusEl.className = "status-indicator offline";
+            });
+        }
+
+        function triggerLocalVibe(strength, duration) {
+            const ip = document.getElementById('toy-ip').value || '127.0.0.1';
+            
+            // Call local LAN API
+            // Note: Use no-cors mode to bypass browser security policies blocking local loopbacks
+            fetch(`http://${ip}:20075/control?v=${strength}&time=${duration}`, { mode: 'no-cors' })
+            .then(() => {
+                logActivity(`Toy vibrated! Strength: ${strength}/20, Duration: ${duration}s`, "toy");
+            })
+            .catch(err => {
+                logActivity(`Failed to send vibration: Ensure Lovense App is open with LAN enabled.`, "error");
+            });
+        }
+
+        function handleVibeEvents(vibeEvents) {
+            if (!myRole || !vibeEvents) return;
+
+            vibeEvents.forEach(evt => {
+                if (evt.role === myRole) {
+                    let strength = 0;
+                    let duration = 0;
+                    let description = "";
+
+                    switch (evt.type) {
+                        case 'turn_alert':
+                            strength = 3;
+                            duration = 0.5;
+                            description = "🔔 Your turn starts! (Gentle Reminder)";
+                            break;
+                        case 'move':
+                            strength = 5;
+                            duration = 1;
+                            description = "🎯 Piece dropped! (Action Feedback)";
+                            break;
+                        case 'threat':
+                            strength = 10;
+                            duration = 2.5;
+                            description = "⚠️ WARNING: Opponent has 3-in-a-row! Block them!";
+                            break;
+                        case 'block':
+                            strength = 12;
+                            duration = 1.5;
+                            description = "🛡️ SUCCESSFUL BLOCK! Opponent was shut down!";
+                            break;
+                        case 'win':
+                            strength = 8;
+                            duration = 5;
+                            description = "🏆 VICTORY BLAST! Wave pleasure active.";
+                            break;
+                        case 'lose':
+                            strength = 20; // Maximum intensity
+                            duration = 8;
+                            description = "💥 PENALTY BLAST! Continuous heavy rumble.";
+                            break;
+                    }
+
+                    if (strength > 0) {
+                        logActivity(description, "system");
+                        triggerLocalVibe(strength, duration);
+                    }
+                }
+            });
+        }
+
+        function logActivity(text, type) {
+            const log = document.getElementById('activity-log');
+            const entry = document.createElement('div');
+            entry.classList.add('log-entry', type);
+            
+            const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            entry.innerHTML = `<span class="log-time">[${time}]</span> ${text}`;
+            
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // =========================================
+        // WEBSOCKET SUBSCRIBER
+        // =========================================
+        socket.on('update', (data) => {
+            const game = data.game || data; // Handle raw updates vs action updates
+            const vibeEvents = data.vibeEvents || null;
+            const lastMove = data.lastMove || null;
+
+            if (viewType === 'board') {
+                updateSpectatorBoard(game, lastMove);
+            } else {
+                updatePlayerController(game);
+                if (vibeEvents) {
+                    handleVibeEvents(vibeEvents);
+                }
+            }
+        });
+    </script>
+</body>
+</html>
