@@ -2,8 +2,8 @@
 // Lovense-Integrated Connect Four Terminal
 // Configures Media-on-a-Prim and manages player role registration.
 
-string SERVER_URL = "http://YOUR_SERVER_IP_OR_DOMAIN:3000"; // Update with your Node.js server URL
-integer MOAP_FACE = 1; // Face number where the screen is displayed
+string SERVER_URL = "https://connect4.alekzane.co.uk"; // Update with your Node.js server URL
+integer MOAP_FACE = 2; // Face number where the screen is displayed
 
 integer DIALOG_CHAN = -29874;
 integer gListen = 0;
@@ -22,10 +22,12 @@ default {
             PRIM_MEDIA_CURRENT_URL, boardUrl,
             PRIM_MEDIA_HOME_URL, boardUrl,
             PRIM_MEDIA_AUTO_PLAY, TRUE,
-            PRIM_MEDIA_CONTROLS, PRIM_MEDIA_CONTROLS_NONE,
-            PRIM_MEDIA_PERMS_INTERACT, PRIM_MEDIA_PERM_NONE
+            PRIM_MEDIA_CONTROLS, PRIM_MEDIA_CONTROLS_MINI,
+            PRIM_MEDIA_PERMS_INTERACT, PRIM_MEDIA_PERM_NONE,
+            PRIM_MEDIA_PERMS_CONTROL, PRIM_MEDIA_PERM_NONE
         ]);
         
+        llSetClickAction(CLICK_ACTION_TOUCH);
         llSetText("🔴 LOVENSE CONNECT 4 🟡\nTouch to join the game", <0.0, 0.9, 1.0>, 1.0);
         llOwnerSay("[Connect 4] Terminal initialized. Spectator URL: " + boardUrl);
     }
