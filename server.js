@@ -217,22 +217,22 @@ app.post('/api/join', async (req, res) => {
 
     if (role === 'red') {
         if (game.player1) return res.status(400).json({ error: "Red slot already taken." });
-        game.player1 = { uuid, name, connected: false, qrCode: null, qrLink: null, qrError: null };
+        game.player1 = { uuid, name, connected: false, qrCode: null, qrLink: null, qrError: null, linkCode: null };
         playerObj = game.player1;
         assignedRole = 'red';
     } else if (role === 'yellow') {
         if (game.player2) return res.status(400).json({ error: "Yellow slot already taken." });
-        game.player2 = { uuid, name, connected: false, qrCode: null, qrLink: null, qrError: null };
+        game.player2 = { uuid, name, connected: false, qrCode: null, qrLink: null, qrError: null, linkCode: null };
         playerObj = game.player2;
         assignedRole = 'yellow';
     } else {
         // Auto assign
         if (!game.player1) {
-            game.player1 = { uuid, name, connected: false, qrCode: null, qrLink: null, qrError: null };
+            game.player1 = { uuid, name, connected: false, qrCode: null, qrLink: null, qrError: null, linkCode: null };
             playerObj = game.player1;
             assignedRole = 'red';
         } else if (!game.player2) {
-            game.player2 = { uuid, name, connected: false, qrCode: null, qrLink: null, qrError: null };
+            game.player2 = { uuid, name, connected: false, qrCode: null, qrLink: null, qrError: null, linkCode: null };
             playerObj = game.player2;
             assignedRole = 'yellow';
         } else {
@@ -252,9 +252,10 @@ app.post('/api/join', async (req, res) => {
             });
             if (resJson.code === 0 && resJson.data) {
                 playerObj.qrCode = resJson.data.qr;
-                playerObj.qrLink = resJson.data.url;
+                playerObj.qrLink = resJson.data.qr; // Use qr URL as fallback
+                playerObj.linkCode = resJson.data.code;
                 playerObj.qrError = null;
-                console.log(`Lovense QR Code retrieved: ${resJson.data.qr}`);
+                console.log(`Lovense QR Code retrieved: ${resJson.data.qr}, Code: ${resJson.data.code}`);
             } else {
                 playerObj.qrError = resJson.message || "Lovense API error";
                 console.error("Lovense QR Code error response:", resJson);

@@ -703,6 +703,9 @@ input[type="text"]:focus {
                 <div class="qr-container" style="text-align: center; margin: 15px 0;">
                     <div id="qr-loading" style="font-size: 0.85rem; color: var(--text-secondary);">Generating QR Code...</div>
                     <img id="qr-image" class="hidden" style="max-width: 180px; border: 6px solid #fff; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); margin: 0 auto;" />
+                    <div id="qr-code-text" class="hidden" style="margin-top: 15px; font-family: 'Orbitron', sans-serif; font-size: 1.1rem; font-weight: bold; color: var(--neon-blue); letter-spacing: 2px;">
+                        Connection Code: <span id="link-code-val">------</span>
+                    </div>
                     <div style="margin-top: 12px;">
                         <a id="qr-link" href="#" target="_blank" class="btn-secondary hidden" style="display: inline-block; font-size: 0.8rem; padding: 6px 12px; text-decoration: none;">Open Lovense App</a>
                     </div>
@@ -924,6 +927,9 @@ input[type="text"]:focus {
                     document.getElementById('setup-section').classList.remove('hidden');
                     document.getElementById('control-pad').classList.remove('hidden');
                     logActivity(`Joined match as ${role.toUpperCase()} Player!`, "system");
+                    if (data.game) {
+                        updatePlayerController(data.game);
+                    }
                 }
             });
         }
@@ -965,6 +971,8 @@ input[type="text"]:focus {
                 const qrImage = document.getElementById('qr-image');
                 const qrLink = document.getElementById('qr-link');
                 const qrLoading = document.getElementById('qr-loading');
+                const qrCodeText = document.getElementById('qr-code-text');
+                const linkCodeVal = document.getElementById('link-code-val');
                 const toyStatus = document.getElementById('toy-status');
                 const testBtn = document.getElementById('btn-test-toy');
                 
@@ -972,6 +980,7 @@ input[type="text"]:focus {
                     qrImage.classList.add('hidden');
                     qrLink.classList.add('hidden');
                     qrLoading.classList.add('hidden');
+                    if (qrCodeText) qrCodeText.classList.add('hidden');
                     toyStatus.innerText = "Connected: Toy Active";
                     toyStatus.className = "status-indicator online";
                     testBtn.classList.remove('hidden');
@@ -983,12 +992,26 @@ input[type="text"]:focus {
                     if (me.qrCode) {
                         qrImage.src = me.qrCode;
                         qrImage.classList.remove('hidden');
-                        qrLink.href = me.qrLink;
-                        qrLink.classList.remove('hidden');
+                        
+                        if (me.qrLink) {
+                            qrLink.href = me.qrLink;
+                            qrLink.classList.remove('hidden');
+                        } else {
+                            qrLink.classList.add('hidden');
+                        }
+                        
+                        if (me.linkCode) {
+                            linkCodeVal.innerText = me.linkCode;
+                            if (qrCodeText) qrCodeText.classList.remove('hidden');
+                        } else {
+                            if (qrCodeText) qrCodeText.classList.add('hidden');
+                        }
+                        
                         qrLoading.classList.add('hidden');
                     } else {
                         qrImage.classList.add('hidden');
                         qrLink.classList.add('hidden');
+                        if (qrCodeText) qrCodeText.classList.add('hidden');
                         if (me.qrError) {
                             qrLoading.innerText = "Error: " + me.qrError;
                             qrLoading.style.color = "var(--neon-red)";
@@ -1049,6 +1072,23 @@ input[type="text"]:focus {
         socket.on('update', (data) => {
             const game = data.game || data; // Handle raw updates vs action updates
             const lastMove = data.lastMove || null;
+
+            // Auto-detect role if not selected yet, based on our UUID
+            if (!myRole && game && viewType === 'play') {
+                if (game.player1 && game.player1.uuid === myUuid) {
+                    myRole = 'red';
+                    document.getElementById('role-section').classList.add('hidden');
+                    document.getElementById('setup-section').classList.remove('hidden');
+                    document.getElementById('control-pad').classList.remove('hidden');
+                    logActivity(`Reconnected as RED Player!`, "system");
+                } else if (game.player2 && game.player2.uuid === myUuid) {
+                    myRole = 'yellow';
+                    document.getElementById('role-section').classList.add('hidden');
+                    document.getElementById('setup-section').classList.remove('hidden');
+                    document.getElementById('control-pad').classList.remove('hidden');
+                    logActivity(`Reconnected as YELLOW Player!`, "system");
+                }
+            }
 
             if (viewType === 'board') {
                 updateSpectatorBoard(game, lastMove);
